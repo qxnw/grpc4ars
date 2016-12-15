@@ -1,7 +1,6 @@
 package grpc4ars
 
 import (
-	"sync"
 	"testing"
 
 	"time"
@@ -24,30 +23,41 @@ func TestNew(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	fmt.Println("s:", time.Now())
+
 	client := client.NewClient()
 	if e := client.ConnectTimeout(":10162", time.Second*3); e != nil {
-		fmt.Println("e:", time.Now())
+
 		t.Error(e)
 		return
 	}
-	mu := sync.WaitGroup{}
-	for i := 0; i < 10000; i++ {
-		mu.Add(1)
-		go func(i int) {
-			svname := fmt.Sprintf("svs:%d", i)
-			s, result, err := client.Request("123455666", svname, "{}")
-			//	fmt.Println(svname)
-			if err != nil {
-				t.Error(err)
-			}
-			if s != 100 || result != svname {
-				t.Error("数据有误")
-			}
-			mu.Done()
-
-		}(i)
+	fmt.Println("s:", time.Now())
+	s, result, err := client.Request("123455666", "svname", "{}")
+	//	fmt.Println(svname)
+	if err != nil {
+		t.Error(err)
 	}
-	mu.Wait()
+	if s != 100 || result != "svname" {
+		t.Error("数据有误")
+	}
+	fmt.Println("e:", time.Now())
+	/*
+		mu := sync.WaitGroup{}
+		for i := 0; i < 10000; i++ {
+			mu.Add(1)
+			go func(i int) {
+				svname := fmt.Sprintf("svs:%d", i)
+				s, result, err := client.Request("123455666", svname, "{}")
+				//	fmt.Println(svname)
+				if err != nil {
+					t.Error(err)
+				}
+				if s != 100 || result != svname {
+					t.Error("数据有误")
+				}
+				mu.Done()
 
+			}(i)
+		}
+		mu.Wait()
+	*/
 }
