@@ -1,13 +1,12 @@
 package grpc4ars
 
 import (
+	"sync"
 	"testing"
 
 	"time"
 
 	"fmt"
-
-	"sync"
 
 	"github.com/qxnw/grpc4ars/client"
 	"github.com/qxnw/grpc4ars/server"
@@ -25,9 +24,12 @@ func TestNew(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	fmt.Println("s:", time.Now())
 	client := client.NewClient()
-	if e := client.ConnectTimeout(":10160", time.Second*3); e != nil {
+	if e := client.ConnectTimeout(":10162", time.Second*3); e != nil {
+		fmt.Println("e:", time.Now())
 		t.Error(e)
+		return
 	}
 	mu := sync.WaitGroup{}
 	for i := 0; i < 10000; i++ {
