@@ -122,6 +122,8 @@ func (c *Client) connectCheck() {
 		}
 	}
 }
+
+//logInfof 日志记录
 func (c *Client) logInfof(format string, msg ...interface{}) {
 	if c.opts.log == nil {
 		return
