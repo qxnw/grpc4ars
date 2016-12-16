@@ -17,12 +17,12 @@ func BenchmarkItems(t *testing.B) {
 		return
 	})
 	go func() {
-		if err := svr.Start(":10160"); err != nil {
+		if err := svr.Start(":10165"); err != nil {
 			t.Error(err)
 		}
 	}()
 
-	client := client.NewClient(":10160")
+	client := client.NewClient(":10165")
 	client.Connect()
 	fmt.Println("s:", time.Now())
 	s, result, err := client.Request("123455666", "svname", "{}")
