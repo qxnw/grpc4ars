@@ -5,13 +5,12 @@ import (
 
 	"github.com/qxnw/grpc4ars/pb"
 
-	"golang.org/x/net/context"
-
 	"google.golang.org/grpc"
 )
 
 //Server RPC Server
 type Server struct {
+	server   *grpc.Server
 	address  string
 	callback func(string, string, string) (int, string, error)
 }
@@ -27,18 +26,15 @@ func (r *Server) Start(address string) (err error) {
 	if err != nil {
 		return
 	}
-	s := grpc.NewServer()
-	pb.RegisterARSServer(s, r)
-	s.Serve(lis)
+	r.server = grpc.NewServer()
+	pb.RegisterARSServer(r.server, &serverCaller{srv: r})
+	r.server.Serve(lis)
 	return
 }
 
-//Request 客户端处理客户端请求
-func (r *Server) Request(context context.Context, request *pb.RequestContext) (p *pb.ResponseContext, err error) {
-	s, d, err := r.callback(request.Session, request.Sevice, request.Input)
-	if err != nil {
-		return
+//Close 关闭连接
+func (r *Server) Close() {
+	if r.server != nil {
+		r.server.GracefulStop()
 	}
-	p = &pb.ResponseContext{Status: int32(s), Result: d}
-	return
 }
