@@ -23,10 +23,7 @@ func BenchmarkItems(t *testing.B) {
 	}()
 
 	client := client.NewClient(":10160")
-	if e := client.Connect(); e != nil {
-		t.Error(e)
-		return
-	}
+	client.Connect()
 	fmt.Println("s:", time.Now())
 	s, result, err := client.Request("123455666", "svname", "{}")
 	//	fmt.Println(svname)

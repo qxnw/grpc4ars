@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/grpclog"
 )
 
 //Client client
@@ -59,6 +60,7 @@ func WithConnectionTimeout(t time.Duration) ClientOption {
 func WithLogger(log logger.ILogger) ClientOption {
 	return func(o *clientOption) {
 		o.log = log
+		grpclog.SetLogger(log)
 	}
 }
 

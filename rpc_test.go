@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 
+	"google.golang.org/grpc"
+
 	"time"
 
 	"fmt"
@@ -12,6 +14,11 @@ import (
 	"github.com/qxnw/grpc4ars/server"
 	"github.com/qxnw/lib4go/logger"
 )
+
+func init() {
+	grpc.EnableTracing = false
+
+}
 
 //测试服务正常调用
 func TestNormal(t *testing.T) {
@@ -27,10 +34,7 @@ func TestNormal(t *testing.T) {
 	}()
 
 	client := client.NewClient(":10160")
-	if e := client.Connect(); e != nil {
-		t.Error(e)
-		return
-	}
+	client.Connect()
 	s, result, err := client.Request("123455666", "svname", "{}")
 	if err != nil {
 		t.Error(err)
@@ -79,15 +83,9 @@ func TestReconnect(t *testing.T) {
 	time.Sleep(time.Second)
 	//--------客户端连接到服务器
 	log := logger.Get("test")
-	client := client.NewClient(":10161", client.WithLong(), client.WithCheckTicker(time.Second), client.WithLogger(log))
-	if e := client.Connect(); e != nil {
-		t.Error(e)
-		return
-	}
-	if e := client.Connect(); e != nil {
-		t.Error(e)
-		return
-	}
+	client := client.NewClient(":10161", client.WithHeartbeat(), client.WithCheckTicker(time.Second), client.WithLogger(log))
+	client.Connect()
+	client.Connect()
 	//----------发送请求
 	s, result, err := client.Request("123455666", "svname", "{}")
 	if err != nil {
@@ -125,9 +123,10 @@ func TestReconnect(t *testing.T) {
 
 //测试客户端由无法连接到服务启动后恢复请求
 func TestCantConnect(t *testing.T) {
+	log := logger.Get("test")
 	//------连接到一个不可达的服务
-	client := client.NewClient(":10163")
-	if e := client.Connect(); e != nil || client.IsConnect {
+	client := client.NewClient(":10163", client.WithLogger(log))
+	if client.Connect(); client.IsConnect {
 		t.Error("应返回无法连接到服务器")
 		return
 	}
