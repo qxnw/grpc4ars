@@ -19,7 +19,6 @@ type ClientPool struct {
 
 type cacheClient struct {
 	Concurrent int32
-	Key        string
 }
 type poolOption struct {
 	concurrent int
@@ -72,38 +71,42 @@ START:
 		key := fmt.Sprintf("%p", client)
 		cacheC, _ := c.cache.Get(key)
 		cache = cacheC.(*cacheClient)
-		select {
-		case c.clients <- client:
-			needBack = false
-		default:
-			needBack = true
+		if int(cache.Concurrent) >= c.opt.concurrent { //检查是否超过限制并发数
+			if _, ok := hasGet[key]; ok { //已重新获取，则需创建新的可用对象
+				c.back(true, client, false, cache)
+				client, cache = c.create()
+				needBack = true
+				return client, cache, true, nil
+			}
+			goto START
 		}
+		atomic.AddInt32(&cache.Concurrent, 1) //未超过限制并发数，累加并发数并放回连接池
+		needBack = !c.back(true, client, false, cache)
 	default:
 		//连接池中没有可用连接则立即创建一个新的连接
-		needBack = true
 		client, cache = c.create()
-	}
-
-	//检查连接是否可用
-	//如果并发数是否大于配置数，如果已大于配置数，检查该连接是否已获取过则创建新连接，否则重新从缓存中获取
-	if int(cache.Concurrent) >= c.opt.concurrent {
-		if _, ok := hasGet[cache.Key]; ok {
-			if needBack {
-				c.back(client)
-			}
-			client, cache = c.create()
-			needBack = true
-			return
-		}
-		goto START
+		needBack = true
 	}
 	return
 }
-func (c *ClientPool) back(client *Client) {
+func (c *ClientPool) back(b bool, client *Client, close bool, cc *cacheClient) bool {
+	if !b {
+		return false
+	}
 	select {
 	case c.clients <- client:
+		if close && cc != nil {
+			atomic.AddInt32(&cc.Concurrent, -1)
+		}
+		return true
 	default:
-		client.Close()
+		if close {
+			if cc != nil {
+				atomic.AddInt32(&cc.Concurrent, -1)
+			}
+			client.Close()
+		}
+		return false
 	}
 }
 func (c *ClientPool) create() (*Client, *cacheClient) {
@@ -111,7 +114,7 @@ func (c *ClientPool) create() (*Client, *cacheClient) {
 	client.Connect()
 	key := fmt.Sprintf("%p", client)
 	_, cacheC, _ := c.cache.SetIfAbsentCb(key, func(input ...interface{}) (interface{}, error) {
-		return &cacheClient{Concurrent: 0, Key: key}, nil
+		return &cacheClient{Concurrent: 1}, nil
 	})
 	return client, cacheC.(*cacheClient)
 }
@@ -123,13 +126,13 @@ func (c *ClientPool) Request(session string, service string, data string) (statu
 	if err != nil {
 		return
 	}
-	atomic.AddInt32(&cache.Concurrent, 1)
-	//2. 发送请求,并将引用引数减1
+	//2. 发送请求
 	status, result, err = client.Request(session, service, data)
-	atomic.AddInt32(&cache.Concurrent, -1)
-	if back {
-		c.back(client)
+	if err != nil {
+		return
 	}
+	//3.还回到连接池
+	c.back(back, client, true, cache)
 	return
 }
 
