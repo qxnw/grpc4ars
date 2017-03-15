@@ -1,5 +1,6 @@
 package client
 
+/*
 import (
 	"fmt"
 	"sync/atomic"
@@ -111,7 +112,6 @@ func (c *ClientPool) back(b bool, client *Client, close bool, cc *cacheClient) b
 }
 func (c *ClientPool) create() (*Client, *cacheClient) {
 	client := NewClient(c.address)
-	client.Connect()
 	key := fmt.Sprintf("%p", client)
 	_, cacheC, _ := c.cache.SetIfAbsentCb(key, func(input ...interface{}) (interface{}, error) {
 		return &cacheClient{Concurrent: 1}, nil
@@ -148,3 +148,4 @@ func (c *ClientPool) Close() {
 		}
 	}
 }
+*/

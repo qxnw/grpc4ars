@@ -1,16 +1,32 @@
 package client
 
 import (
-	"strconv"
+	"fmt"
+	"io"
 	"time"
 
+	"github.com/lunny/log"
+	"github.com/qxnw/grpc4ars/client/balancer/zkbalancer"
 	"github.com/qxnw/grpc4ars/pb"
-	"github.com/qxnw/lib4go/logger"
+
+	"os"
+
+	"strings"
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/grpclog"
 )
+
+//Logger 日志组件
+type Logger interface {
+	Fatal(args ...interface{})
+	Fatalf(format string, args ...interface{})
+	Fatalln(args ...interface{})
+	Print(args ...interface{})
+	Printf(format string, args ...interface{})
+	Println(args ...interface{})
+}
 
 //Client client
 type Client struct {
@@ -26,28 +42,14 @@ type Client struct {
 }
 
 type clientOption struct {
-	heartbeat         bool
-	heartbeatTicker   time.Duration
 	connectionTimeout time.Duration
-	log               logger.ILogger
+	log               Logger
+	balancer          grpc.Balancer
+	serviceGroup      string
 }
 
 //ClientOption 客户端配置选项
 type ClientOption func(*clientOption)
-
-//WithHeartbeat 定时发送心跳数据
-func WithHeartbeat() ClientOption {
-	return func(o *clientOption) {
-		o.heartbeat = true
-	}
-}
-
-//WithCheckTicker 连接状态检查间隔时间
-func WithCheckTicker(t time.Duration) ClientOption {
-	return func(o *clientOption) {
-		o.heartbeatTicker = t
-	}
-}
 
 //WithConnectionTimeout 网络连接超时时长
 func WithConnectionTimeout(t time.Duration) ClientOption {
@@ -57,38 +59,52 @@ func WithConnectionTimeout(t time.Duration) ClientOption {
 }
 
 //WithLogger 设置日志记录器
-func WithLogger(log logger.ILogger) ClientOption {
+func WithLogger(log Logger) ClientOption {
 	return func(o *clientOption) {
 		o.log = log
-		grpclog.SetLogger(log)
+	}
+}
+
+//WithZKRoundRobinBalancer 设置负载均衡器
+func WithZKRoundRobinBalancer(serviceGroup string, timeout time.Duration) ClientOption {
+	return func(o *clientOption) {
+		r := zkbalancer.NewResolver(serviceGroup, timeout)
+		o.serviceGroup = serviceGroup
+		o.balancer = grpc.RoundRobin(r)
 	}
 }
 
 //NewClient 创建客户端
 func NewClient(address string, opts ...ClientOption) *Client {
-	client := &Client{address: address, opts: &clientOption{heartbeatTicker: time.Second * 15, connectionTimeout: time.Second * 3}}
+	client := &Client{address: address, opts: &clientOption{connectionTimeout: time.Second * 3}}
 	for _, opt := range opts {
 		opt(client.opts)
 	}
+	if client.opts.log == nil {
+		client.opts.log = NewLogger(os.Stdout)
+	}
+	grpclog.SetLogger(client.opts.log)
+	client.connect()
 	return client
 }
 
 //Connect 连接服务器，如果当前无法连接系统会定时自动重连
-func (c *Client) Connect() (b bool) {
+func (c *Client) connect() (b bool) {
 	if c.IsConnect {
 		return
 	}
 	var err error
-	c.conn, err = grpc.Dial(c.address, grpc.WithInsecure(), grpc.WithTimeout(c.opts.connectionTimeout))
+	if c.opts.balancer == nil {
+		c.conn, err = grpc.Dial(c.address, grpc.WithInsecure(), grpc.WithTimeout(c.opts.connectionTimeout))
+	} else {
+		ctx, _ := context.WithTimeout(context.Background(), c.opts.connectionTimeout)
+		c.conn, err = grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBalancer(c.opts.balancer))
+	}
 	if err != nil {
 		c.IsConnect = false
 		return c.IsConnect
 	}
 	c.client = pb.NewARSClient(c.conn)
-	if c.opts.heartbeat && !c.hasRunChecker {
-		c.hasRunChecker = true
-		go c.connectCheck()
-	}
 	//检查是否已连接到服务器
 	response, er := c.client.Heartbeat(context.Background(), &pb.HBRequest{Ping: 0})
 	c.IsConnect = er == nil && response.Pong == 0
@@ -98,6 +114,9 @@ func (c *Client) Connect() (b bool) {
 //Request 发送请求
 func (c *Client) Request(session string, service string, data string) (status int, result string, err error) {
 	c.lastRequest = time.Now()
+	if !strings.HasPrefix(service, c.opts.serviceGroup) {
+		return 500, "", fmt.Errorf("服务:%s,必须以:%s开头", service, c.opts.prefix)
+	}
 	response, err := c.client.Request(context.Background(), &pb.RequestContext{Session: session, Sevice: service, Input: data})
 	if err != nil {
 		c.IsConnect = false
@@ -109,28 +128,12 @@ func (c *Client) Request(session string, service string, data string) (status in
 	return
 }
 
-//connectCheck 网络连接状态检查
-func (c *Client) connectCheck() {
-	c.longTicker = time.NewTicker(c.opts.heartbeatTicker)
-	for {
-		select {
-		case <-c.longTicker.C:
-			oping, _ := strconv.Atoi(time.Now().Format("150405"))
-			ping := int32(oping)
-			response, err := c.client.Heartbeat(context.Background(), &pb.HBRequest{Ping: ping})
-			c.IsConnect = err == nil && response.Pong == ping
-			c.logInfof("[心跳]%s %d %v", c.address, oping, c.IsConnect)
-			c.lastRequest = time.Now()
-		}
-	}
-}
-
 //logInfof 日志记录
 func (c *Client) logInfof(format string, msg ...interface{}) {
 	if c.opts.log == nil {
 		return
 	}
-	c.opts.log.Infof(format, msg...)
+	c.opts.log.Printf(format, msg...)
 }
 
 //Close 关闭连接
@@ -142,4 +145,11 @@ func (c *Client) Close() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
+}
+
+//NewLogger 创建日志组件
+func NewLogger(out io.Writer) Logger {
+	l := log.New(out, "[grpc.client] ", log.Ldefault())
+	l.SetOutputLevel(log.Ldebug)
+	return l
 }
