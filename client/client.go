@@ -117,7 +117,8 @@ func (c *Client) Request(session string, service string, data string) (status in
 	if !strings.HasPrefix(service, c.opts.serviceGroup) {
 		return 500, "", fmt.Errorf("服务:%s,必须以:%s开头", service, c.opts.prefix)
 	}
-	response, err := c.client.Request(context.Background(), &pb.RequestContext{Session: session, Sevice: service, Input: data})
+	response, err := c.client.Request(context.Background(), &pb.RequestContext{Session: session, Sevice: service, Input: data},
+		grpc.FailFast(true))
 	if err != nil {
 		c.IsConnect = false
 		return
